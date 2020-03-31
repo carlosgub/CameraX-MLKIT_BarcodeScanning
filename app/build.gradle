@@ -59,4 +59,7 @@ dependencies {
     //Firebase
     implementation 'com.google.firebase:firebase-ml-vision:24.0.1'
     implementation 'com.google.firebase:firebase-ml-vision-barcode-model:16.0.2'
+
+    //Lottie
+    implementation 'com.airbnb.android:lottie:3.3.1'
 }

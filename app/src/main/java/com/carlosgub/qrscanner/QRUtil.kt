@@ -5,8 +5,10 @@ import com.google.firebase.ml.vision.FirebaseVision
 import com.google.firebase.ml.vision.barcode.FirebaseVisionBarcode
 import com.google.firebase.ml.vision.barcode.FirebaseVisionBarcodeDetectorOptions
 import com.google.firebase.ml.vision.common.FirebaseVisionImage
+import kotlinx.coroutines.*
+import kotlin.coroutines.CoroutineContext
 
-class QRUtil{
+class QRUtil {
 
     private var listener:Listener?=null
 
@@ -52,13 +54,13 @@ class QRUtil{
                     }
                 }else{
                     listener?.nextImage()
+                    detector.close()
                 }
 
             }
             .addOnFailureListener {
                 it.printStackTrace()
                 listener?.onError(it.message)
-                listener?.nextImage()
             }
     }
 }

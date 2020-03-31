@@ -2,9 +2,11 @@ package com.carlosgub.qrscanner
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.hardware.display.DisplayManager
 import android.media.Image
 import android.os.Bundle
 import android.util.DisplayMetrics
@@ -12,7 +14,6 @@ import android.util.Log
 import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.camera2.Camera2Config
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
@@ -25,7 +26,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listener {
+class MainActivity : AppCompatActivity(), QRUtil.Listener {
 
     companion object {
         private const val REQUEST_CODE_PERMISSIONS = 10
@@ -36,10 +37,29 @@ class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listene
     private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
     private var qrUtil = QRUtil()
     private var preview: Preview? = null
-    private var camera: Camera? = null
     private var imageCapture: ImageCapture? = null
     private var lensFacing: Int = CameraSelector.LENS_FACING_BACK
+    private var displayId: Int = -1
     private var onPause = false //Verificar que el activity no esta en OnPause
+
+    private val displayManager by lazy {
+        this.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+    }
+
+    /**
+     * We need a display listener for orientation changes that do not trigger a configuration
+     * change, for example if we choose to override config change in manifest or for 180-degree
+     * orientation changes.
+     */
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) = pvMain?.let { view ->
+            if (displayId == this@MainActivity.displayId) {
+                imageCapture?.targetRotation = view.display.rotation
+            }
+        } ?: Unit
+    }
 
 
     /** Blocking camera operations are performed using this executor */
@@ -53,7 +73,8 @@ class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listene
 
         //Verificar Permisos
         if (allPermissionsGranted()) {
-            pvMain.post { startCamera() }
+            // Keep track of the display in which this view is attached
+            initCamera()
         } else {
             ActivityCompat.requestPermissions(
                 this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS
@@ -63,6 +84,8 @@ class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listene
         // Initialize our background executor
         qrUtil.setListener(this)
         cameraExecutor = Executors.newSingleThreadExecutor()
+        // Every time the orientation of device changes, update rotation for use cases
+        displayManager.registerDisplayListener(displayListener, null)
 
         btContinueScanning.setOnClickListener {
             nextImage()
@@ -113,16 +136,13 @@ class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listene
                 .setTargetRotation(rotation)
                 .build()
 
-            // Must unbind the use-cases before rebinding them
-            cameraProvider.unbindAll()
 
             try {
                 // A variable number of use-cases can be passed here -
                 // camera provides access to CameraControl & CameraInfo
-                camera = cameraProvider.bindToLifecycle(
+                cameraProvider.bindToLifecycle(
                     this, cameraSelector, preview, imageCapture
                 )
-
                 nextImage()
             } catch (exc: Exception) {
                 Log.e(":)", "Use case binding failed", exc)
@@ -137,6 +157,14 @@ class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listene
         ) == PackageManager.PERMISSION_GRANTED
     }
 
+    private fun initCamera() {
+        pvMain.post {
+            displayId = pvMain.display.displayId
+            startCamera()
+            nextImage()
+        }
+    }
+
     override fun onError(error: String?) {
         Toast.makeText(this, error, Toast.LENGTH_LONG).show()
     }
@@ -146,21 +174,30 @@ class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listene
         btContinueScanning.visibility = View.VISIBLE
     }
 
+    @SuppressLint("UnsafeExperimentalUsageError")
     override fun nextImage() {
-
         // Setup image capture listener which is triggered after photo has been taken
-        imageCapture?.takePicture( cameraExecutor, object: ImageCapture.OnImageCapturedCallback() {
-            @SuppressLint("UnsafeExperimentalUsageError")
-            override fun onCaptureSuccess(image: ImageProxy) {
-                image.image?.toBitmap()?.let {
-                    if (!onPause) qrUtil.getQRCodeDetails(it)
-                }
-            }
+        imageCapture?.let { imageCapture ->
+            imageCapture.takePicture(
+                cameraExecutor,
+                object : ImageCapture.OnImageCapturedCallback() {
+                    override fun onCaptureSuccess(image: ImageProxy) {
+                        if (image.image != null) {
+                            image.image!!.toBitmap().let {
+                                if (!onPause) qrUtil.getQRCodeDetails(it)
+                            }
+                        } else {
+                            nextImage()
+                        }
+                        image.close()
 
-            override fun onError(exception: ImageCaptureException) {
+                    }
 
-            }
-        })
+                    override fun onError(exception: ImageCaptureException) {
+                        onError(exception.message)
+                    }
+                })
+        }
     }
 
     fun Image.toBitmap(): Bitmap {
@@ -179,11 +216,7 @@ class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listene
     override fun onResume() {
         super.onResume()
         onPause = false
-        btContinueScanning.performClick()
-    }
-
-    override fun getCameraXConfig(): CameraXConfig {
-        return Camera2Config.defaultConfig()
+        if (imageCapture != null) btContinueScanning.performClick()
     }
 
     private fun aspectRatio(width: Int, height: Int): Int {
@@ -199,7 +232,7 @@ class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listene
     ) {
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (allPermissionsGranted()) {
-                pvMain.post { startCamera() }
+                initCamera()
             } else {
                 Toast.makeText(
                     this,
@@ -216,5 +249,6 @@ class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listene
 
         // Shut down our background executor
         cameraExecutor.shutdown()
+        displayManager.unregisterDisplayListener(displayListener)
     }
 }
