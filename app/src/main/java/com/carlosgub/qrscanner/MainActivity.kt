@@ -64,9 +64,9 @@ class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listene
         qrUtil.setListener(this)
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        btClearImage.setOnClickListener {
+        btContinueScanning.setOnClickListener {
             nextImage()
-            btClearImage.visibility = View.GONE
+            btContinueScanning.visibility = View.GONE
         }
     }
 
@@ -143,7 +143,7 @@ class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listene
 
     override fun onSuccess(barcodeValue: String) {
         Toast.makeText(this, barcodeValue, Toast.LENGTH_LONG).show()
-        btClearImage.visibility = View.VISIBLE
+        btContinueScanning.visibility = View.VISIBLE
     }
 
     override fun nextImage() {
@@ -179,7 +179,7 @@ class MainActivity : AppCompatActivity(), CameraXConfig.Provider, QRUtil.Listene
     override fun onResume() {
         super.onResume()
         onPause = false
-        btClearImage.performClick()
+        btContinueScanning.performClick()
     }
 
     override fun getCameraXConfig(): CameraXConfig {
