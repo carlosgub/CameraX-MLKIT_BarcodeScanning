@@ -3,7 +3,7 @@
 
 This is an example of an Android App who uses CameraX with ML KIT Barcode Scanning to scan Barcode and QR images in realtime on-device.
 
-<img src="img/1.png" width="400" height="800" />
+<img src="img/1.gif" width="400" height="800" />
 
 ## Dependencies
 
