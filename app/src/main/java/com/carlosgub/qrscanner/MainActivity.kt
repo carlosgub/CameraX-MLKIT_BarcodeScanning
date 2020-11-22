@@ -18,8 +18,8 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.carlosgub.qrscanner.databinding.MainActivityBinding
 import com.google.common.util.concurrent.ListenableFuture
-import kotlinx.android.synthetic.main.activity_main.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -35,6 +35,8 @@ class MainActivity : AppCompatActivity(), QRUtil.Listener {
     }
 
     private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
+
+    private lateinit var binding: MainActivityBinding
     private var qrUtil = QRUtil()
     private var preview: Preview? = null
     private var imageCapture: ImageCapture? = null
@@ -54,11 +56,11 @@ class MainActivity : AppCompatActivity(), QRUtil.Listener {
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
         override fun onDisplayRemoved(displayId: Int) = Unit
-        override fun onDisplayChanged(displayId: Int) = pvMain?.let { view ->
+        override fun onDisplayChanged(displayId: Int) = binding.pvMain.let { view ->
             if (displayId == this@MainActivity.displayId) {
                 imageCapture?.targetRotation = view.display.rotation
             }
-        } ?: Unit
+        }
     }
 
 
@@ -67,11 +69,29 @@ class MainActivity : AppCompatActivity(), QRUtil.Listener {
 
     private lateinit var cameraProviderFuture: ListenableFuture<ProcessCameraProvider>
 
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        binding = MainActivityBinding.inflate(layoutInflater)
+        val view = binding.root
+        setContentView(view)
 
-        //Verificar Permisos
+        verifyCameraPermission()
+
+        qrUtil.setListener(this)
+
+        // Initialize our background executor
+        cameraExecutor = Executors.newSingleThreadExecutor()
+        // Every time the orientation of device changes, update rotation for use cases
+        displayManager.registerDisplayListener(displayListener, null)
+
+        binding.btContinueScanning.setOnClickListener {
+            nextImage()
+            binding.btContinueScanning.visibility = View.GONE
+        }
+    }
+
+    private fun verifyCameraPermission() {
         if (allPermissionsGranted()) {
             // Keep track of the display in which this view is attached
             initCamera()
@@ -80,36 +100,32 @@ class MainActivity : AppCompatActivity(), QRUtil.Listener {
                 this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS
             )
         }
+    }
 
-        // Initialize our background executor
-        qrUtil.setListener(this)
-        cameraExecutor = Executors.newSingleThreadExecutor()
-        // Every time the orientation of device changes, update rotation for use cases
-        displayManager.registerDisplayListener(displayListener, null)
-
-        btContinueScanning.setOnClickListener {
+    private fun initCamera() {
+        binding.pvMain.post {
+            displayId = binding.pvMain.display.displayId
+            startCamera()
             nextImage()
-            btContinueScanning.visibility = View.GONE
         }
     }
 
     private fun startCamera() {
         //Obtener las metricas
-        val metrics = DisplayMetrics().also { pvMain.display.getRealMetrics(it) }
+        val metrics = DisplayMetrics().also { binding.pvMain.display.getRealMetrics(it) }
 
         //Calcular el ratio de la pantalla
         val screenAspectRatio = aspectRatio(metrics.widthPixels, metrics.heightPixels)
 
         //Obtener la rotacion
-        val rotation = pvMain.display.rotation
+        val rotation = binding.pvMain.display.rotation
 
         //Request a CameraProvider
         cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         // Bind the CameraProvider to the LifeCycleOwner
         val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
 
-        cameraProviderFuture.addListener(Runnable {
-
+        cameraProviderFuture.addListener({
 
             // CameraProvider
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
@@ -123,7 +139,7 @@ class MainActivity : AppCompatActivity(), QRUtil.Listener {
                 .build()
 
             // Attach the viewfinder's surface provider to preview use case
-            preview?.setSurfaceProvider(pvMain.previewSurfaceProvider)
+            preview?.setSurfaceProvider(binding.pvMain.surfaceProvider)
 
             // ImageCapture
             imageCapture = ImageCapture.Builder()
@@ -151,27 +167,13 @@ class MainActivity : AppCompatActivity(), QRUtil.Listener {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
-        ContextCompat.checkSelfPermission(
-            baseContext, it
-        ) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun initCamera() {
-        pvMain.post {
-            displayId = pvMain.display.displayId
-            startCamera()
-            nextImage()
-        }
-    }
-
     override fun onError(error: String?) {
         Toast.makeText(this, error, Toast.LENGTH_LONG).show()
     }
 
     override fun onSuccess(barcodeValue: String) {
         Toast.makeText(this, barcodeValue, Toast.LENGTH_LONG).show()
-        btContinueScanning.visibility = View.VISIBLE
+        binding.btContinueScanning.visibility = View.VISIBLE
     }
 
     @SuppressLint("UnsafeExperimentalUsageError")
@@ -190,7 +192,6 @@ class MainActivity : AppCompatActivity(), QRUtil.Listener {
                             nextImage()
                         }
                         image.close()
-
                     }
 
                     override fun onError(exception: ImageCaptureException) {
@@ -205,18 +206,21 @@ class MainActivity : AppCompatActivity(), QRUtil.Listener {
         buffer.rewind()
         val bytes = ByteArray(buffer.capacity())
         buffer.get(bytes)
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        return reduceBitmapSize(BitmapFactory.decodeByteArray(bytes, 0, bytes.size), 500)
     }
 
-    override fun onPause() {
-        super.onPause()
-        onPause = true
-    }
-
-    override fun onResume() {
-        super.onResume()
-        onPause = false
-        if (imageCapture != null) btContinueScanning.performClick()
+    fun reduceBitmapSize(image: Bitmap, maxSize: Int): Bitmap {
+        var width = 50
+        var height = 50
+        val bitmapRatio = width.toFloat() / height.toFloat()
+        if (bitmapRatio > 1) {
+            width = maxSize
+            height = (width / bitmapRatio).toInt()
+        } else {
+            height = maxSize
+            width = (height * bitmapRatio).toInt()
+        }
+        return Bitmap.createScaledBitmap(image, width, height, true)
     }
 
     private fun aspectRatio(width: Int, height: Int): Int {
@@ -242,6 +246,23 @@ class MainActivity : AppCompatActivity(), QRUtil.Listener {
                 finish()
             }
         }
+    }
+
+    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
+        ContextCompat.checkSelfPermission(
+            baseContext, it
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    override fun onResume() {
+        super.onResume()
+        onPause = false
+        if (imageCapture != null) binding.btContinueScanning.performClick()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        onPause = true
     }
 
     override fun onDestroy() {
