@@ -1,6 +1,6 @@
 package com.carlosgub.qrscanner
 
-import android.graphics.Bitmap
+import android.media.Image
 import com.google.firebase.ml.vision.FirebaseVision
 import com.google.firebase.ml.vision.barcode.FirebaseVisionBarcode
 import com.google.firebase.ml.vision.barcode.FirebaseVisionBarcodeDetectorOptions
@@ -20,7 +20,7 @@ class QRUtil {
         this.listener = listener
     }
 
-    fun getQRCodeDetails(bitmap: Bitmap) {
+    fun getQRCodeDetails(mediaImage: Image, rotation: Int) {
         val options = FirebaseVisionBarcodeDetectorOptions.Builder()
             .setBarcodeFormats(
                 FirebaseVisionBarcode.FORMAT_ALL_FORMATS
@@ -44,7 +44,7 @@ class QRUtil {
         Data Matrix (FORMAT_DATA_MATRIX)
          */
         val detector = FirebaseVision.getInstance().getVisionBarcodeDetector(options)
-        val image = FirebaseVisionImage.fromBitmap(bitmap)
+        val image = FirebaseVisionImage.fromMediaImage(mediaImage, rotation)
         detector.detectInImage(image)
             .addOnSuccessListener {
                 if (it.isNotEmpty()) {
